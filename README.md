@@ -1,118 +1,86 @@
-# 🪨 Rock Paper Scissors — Online Multiplayer
+# 🪨 Rock Paper Scissors — Render Deploy Guide
 
-Real-time multiplayer RPS with random matchmaking, private rooms, and a persistent all-time leaderboard.
-
-## Stack
-- **Backend**: Node.js + Express + Socket.io
-- **Database**: SQLite (via better-sqlite3) — zero config, file-based
-- **Frontend**: Vanilla HTML/CSS/JS (served statically)
-
----
-
-## 🚀 Deploy on Your VPS
-
-### 1. Install Node.js (if not already)
-```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
+## 📁 Files
 ```
-
-### 2. Upload the project
-```bash
-# From your local machine:
-scp -r rps-game/ user@YOUR_VPS_IP:/home/user/rps-game
-```
-Or clone/copy however you prefer.
-
-### 3. Install dependencies
-```bash
-cd /home/user/rps-game
-npm install
-```
-
-### 4. Run it
-```bash
-node server.js
-# Runs on port 3000 by default
-```
-
----
-
-## 🔁 Keep it running with PM2 (recommended)
-
-```bash
-npm install -g pm2
-pm2 start server.js --name rps
-pm2 save
-pm2 startup   # Follow the printed command to auto-start on reboot
-```
-
----
-
-## 🌐 Expose it with Nginx (optional but recommended)
-
-Install Nginx:
-```bash
-sudo apt install nginx
-```
-
-Create a site config at `/etc/nginx/sites-available/rps`:
-```nginx
-server {
-    listen 80;
-    server_name yourdomain.com;   # or your VPS IP
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-```
-
-Enable it:
-```bash
-sudo ln -s /etc/nginx/sites-available/rps /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-### Add HTTPS (free with Let's Encrypt):
-```bash
-sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d yourdomain.com
-```
-
----
-
-## ⚙️ Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT`   | `3000`  | Port to listen on |
-
-Set via: `PORT=8080 node server.js` or in PM2 config.
-
----
-
-## 📁 File Structure
-```
-rps-game/
-├── server.js          # Backend (Express + Socket.io + SQLite)
+rps-game-v2/
+├── server.js        # Express + Socket.io (async, PostgreSQL)
+├── db.js            # PostgreSQL queries via pg
+├── config.js        # Email / SMTP config
 ├── package.json
-├── leaderboard.db     # Auto-created on first run
 └── public/
-    └── index.html     # Frontend (served statically)
+    └── index.html   # Full frontend
 ```
 
 ---
 
-## 🎮 Features
-- **Random matchmaking** — join a queue, get paired with anyone online
-- **Private rooms** — create a room, get a 6-character code, share with friend
-- **Live leaderboard** — updates after every round, shows W/L/D + win%
-- **Play again** — both players can rematch without leaving
-- **Disconnect handling** — opponent is notified if you leave
+## 🚀 Deploy on Render (Step by Step)
+
+### Step 1 — Push to GitHub
+Render deploys from Git. Push your project to a GitHub repo:
+```bash
+git init
+git add .
+git commit -m "initial commit"
+git remote add origin https://github.com/YOUR_USERNAME/rps-game.git
+git push -u origin main
+```
+
+### Step 2 — Create PostgreSQL Database on Render
+1. Go to [render.com](https://render.com) → **New** → **PostgreSQL**
+2. Give it a name (e.g. `rps-db`)
+3. Choose the **Free** plan
+4. Click **Create Database**
+5. Once created, copy the **Internal Database URL** (starts with `postgres://`)
+
+### Step 3 — Create Web Service on Render
+1. **New** → **Web Service**
+2. Connect your GitHub repo
+3. Fill in:
+   - **Name**: `rps-game`
+   - **Runtime**: `Node`
+   - **Build Command**: `npm install`
+   - **Start Command**: `node server.js`
+   - **Plan**: Free
+
+### Step 4 — Set Environment Variables
+In your Web Service → **Environment** tab, add these:
+
+| Key | Value |
+|-----|-------|
+| `DATABASE_URL` | (paste the Internal DB URL from Step 2) |
+| `PORT` | `10000` |
+| `SMTP_HOST` | `smtp.gmail.com` |
+| `SMTP_PORT` | `587` |
+| `SMTP_USER` | `your@gmail.com` |
+| `SMTP_PASS` | `your-gmail-app-password` |
+| `SMTP_FROM` | `"RPS Game" <your@gmail.com>` |
+| `SESSION_SECRET` | any long random string |
+
+> **Gmail App Password**: Google Account → Security → 2-Step Verification → App Passwords → generate one
+
+### Step 5 — Deploy
+Click **Deploy** — Render will install deps, connect to Postgres, and go live.
+
+Your app will be at: `https://rps-game.onrender.com`
+
+---
+
+## ⚠️ Render Free Tier Notes
+- Web services **spin down after 15 min of inactivity** — first load after sleep takes ~30s
+- PostgreSQL free tier has a **90-day limit** then you need to recreate it
+- Upgrade to a paid plan ($7/mo) to avoid spindown
+
+---
+
+## ✨ Features
+| Feature | Details |
+|---|---|
+| 📧 Email OTP | 6-digit code, 10-min expiry |
+| 👤 Guest Mode | Saved by IP + localStorage |
+| 🔐 Private Rooms | 6-char code, host sets goal |
+| 🎲 Matchmaking | Queue-based random pairing |
+| 🤝 Goal Negotiation | Propose / accept / counter |
+| ✊ Hand Animations | Shake + bounce reveal |
+| 📊 Round History | W/L/D dots + live score |
+| 🏆 Leaderboard | Registered players, all-time wins |
+| 💾 PostgreSQL | Persistent data on Render |
