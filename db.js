@@ -94,10 +94,10 @@ async function deleteOTP(email) {
 async function getLeaderboard() {
   const r = await pool.query(`
     SELECT username, wins, losses, draws,
-      ROUND(CAST(wins AS FLOAT) / GREATEST(wins+losses+draws, 1) * 100, 1) AS win_pct
-    FROM users
-    ORDER BY wins DESC, win_pct DESC
-    LIMIT 20
+ROUND(((CAST(wins AS FLOAT) / GREATEST(wins+losses+draws, 1) * 100))::numeric, 1) AS win_pct
+FROM users
+ORDER BY wins DESC, win_pct DESC
+LIMIT 20
   `);
   return r.rows;
 }
