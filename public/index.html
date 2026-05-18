@@ -1529,7 +1529,7 @@ function loginSuccess(user){
 }
 
 function showFriendsToggle(){
-  if(me && me.type==='registered'){
+  if(me && me.username){
     $('friends-toggle').classList.add('visible');
     loadFriends();
   }
@@ -1550,6 +1550,8 @@ function continueAsGuest(){
   $('ub-badge').textContent='Guest';
   $('ub-badge').className='badge badge-guest';
   showPage('page-lobby');
+  $('friends-toggle').classList.add('visible');
+  loadFriends();
 
   // Tell socket in background
   socket.emit('identify',{type:'guest',username});
@@ -1949,11 +1951,11 @@ function myHeader(){ return { 'Content-Type':'application/json', 'x-username': m
 function toggleSidebar(){
   const sb = $('friends-sidebar');
   const open = sb.classList.toggle('open');
-  if(open && me && me.type === 'registered') loadFriends();
+  if(open && me) loadFriends();
 }
 
 function showSidebarForRegistered(){
-  if(me && me.type === 'registered'){
+  if(me && (me.type === 'registered' || me.type === 'guest')){
     $('friends-toggle').classList.add('visible');
     loadFriends();
   }
@@ -1973,7 +1975,7 @@ function fsbTab(tab){
 
 // ── Load friends ──────────────────────────────────────────────────
 async function loadFriends(){
-  if(!me || me.type !== 'registered') return;
+  if(!me || !me.username) return;
   try{
     const res = await fetch('/friends', { headers: myHeader() });
     const data = await res.json();
@@ -2053,7 +2055,7 @@ function searchUsers(q){
   clearTimeout(searchTimer);
   const res = $('fsb-search-results');
   if(!q || q.length < 2){ res.innerHTML='<div class="fsb-empty" style="font-size:.72rem">Type at least 2 characters to search.</div>'; return; }
-  if(!me || me.type !== 'registered'){ res.innerHTML='<div class="fsb-empty">Log in to search users.</div>'; return; }
+  if(!me || !me.username){ res.innerHTML='<div class="fsb-empty">Log in to search users.</div>'; return; }
   res.innerHTML='<div class="fsb-empty">Searching…</div>';
   searchTimer = setTimeout(async ()=>{
     try{
@@ -2296,7 +2298,7 @@ socket.on('friend_accepted', ({ by }) => {
 
 // ── Poll friends every 30s while sidebar open ─────────────────────
 setInterval(()=>{
-  if($('friends-sidebar').classList.contains('open') && me?.type==='registered'){
+  if($('friends-sidebar').classList.contains('open') && me?.username){
     loadFriends();
   }
 }, 30000);
@@ -2325,7 +2327,7 @@ async function openProfile(username){
 
 function closeProfile(){
   showPage(prevPage);
-  if(me?.type==='registered') $('friends-toggle').classList.add('visible');
+  if(me?.username) $('friends-toggle').classList.add('visible');
 }
 
 async function loadProfile(username){
