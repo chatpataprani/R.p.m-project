@@ -932,6 +932,7 @@ input::placeholder{color:var(--muted2);}
         <span class="badge" id="ub-badge"></span>
       </div>
       <div class="user-bar-right">
+        <button class="btn btn-ghost btn-sm" id="btn-admin-panel" onclick="openAdminPanel()" style="display:none;color:var(--gold);border-color:rgba(240,180,41,.3);">⚙️ Admin</button>
         <button class="btn btn-ghost btn-sm" onclick="openProfile(me?.username)">My Profile</button>
         <button class="btn btn-ghost btn-sm" onclick="logout()">Log out</button>
       </div>
@@ -1225,8 +1226,9 @@ input::placeholder{color:var(--muted2);}
 // ══════════════════════════════════════════════════════ CORE
 const socket = io();
 let me = null;
-let adminPassword = null; // stored in memory only
+let adminPassword = null;
 let allUsersCache = [];
+const ADMIN_USERNAME = 'dumber.4mir';
 
 // ── pending auth state ──
 let pendingUsername = '';
@@ -1257,15 +1259,16 @@ function clearAuthErr(elId){ hide(elId); }
 
 function renderLB(data,tbodyId){
   const tb=$(tbodyId);
-  if(!data||!data.length){tb.innerHTML=`<tr><td colspan="6" class="lb-empty">No registered players yet</td></tr>`;return;}
+  if(!data||!data.length){tb.innerHTML=`<tr><td colspan="6" class="lb-empty">No players yet</td></tr>`;return;}
   tb.innerHTML=data.map((r,i)=>{
     const rank=i+1;
     const rc=rank===1?'gold':rank===2?'silver':rank===3?'bronze':'';
     const medal=rank===1?'🥇':rank===2?'🥈':rank===3?'🥉':rank;
     const isMe=me&&r.username===me.username;
+    const guestTag=r.type==='guest'?` <span style="font-size:.55rem;color:var(--muted);background:var(--border);padding:1px 5px;border-radius:3px;vertical-align:middle">guest</span>`:'';
     return `<tr class="${isMe?'lb-you':''}">
       <td class="lb-rank ${rc}">${medal}</td>
-      <td>${r.username}${isMe?' <span style="font-size:.62rem;color:var(--accent)">(you)</span>':''}</td>
+      <td style="cursor:pointer" onclick="openProfile('${r.username}')">${r.username}${guestTag}${isMe?' <span style="font-size:.62rem;color:var(--accent)">(you)</span>':''}</td>
       <td class="lb-wins">${r.wins}</td><td class="lb-losses">${r.losses}</td>
       <td class="lb-draws">${r.draws}</td><td class="lb-pct">${r.win_pct}%</td>
     </tr>`;
@@ -1354,26 +1357,56 @@ async function requestOTPForNew(){
   if(!email||!email.includes('@')){authErr('auth-error-2','Enter a valid email.');return;}
   pendingEmail=email;
   clearAuthErr('auth-error-2');
-  const ok=await doRequestOTP(email, pendingUsername);
-  if(ok){
+
+  // Show loading state
+  const btn=document.querySelector('#step-new-email .btn-primary');
+  const origText=btn.textContent;
+  btn.textContent='Sending…';
+  btn.disabled=true;
+
+  try{
+    const res=await fetch('/auth/request-otp',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email,username:pendingUsername})
+    });
+    const d=await res.json();
+    if(!d.ok){
+      authErr('auth-error-2', d.error||'Failed to send code.');
+      btn.textContent=origText; btn.disabled=false;
+      return;
+    }
     $('new-email-label').textContent=email;
     showLoginStep('step-new-otp');
     setupOTPBoxes('otp-boxes-new', verifyNewOTP);
+    notify('Code sent! Check your inbox ✉️','good',5000);
+  }catch(e){
+    authErr('auth-error-2','Network error. Check your connection.');
+  }finally{
+    btn.textContent=origText; btn.disabled=false;
   }
 }
 
-async function doRequestOTP(email, username){
+async function doRequestOTP(email, username, errorElId){
   try{
-    const res=await fetch('/auth/request-otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,username})});
+    const res=await fetch('/auth/request-otp',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email,username})
+    });
     const d=await res.json();
     if(!d.ok){
-      notify('⚠ '+d.error,'bad',6000);
+      const msg=d.error||'Failed to send code.';
+      notify('⚠ '+msg,'bad',8000);
+      if(errorElId) authErr(errorElId, msg);
       return false;
     }
-    notify('Code sent! Check your inbox','good');
+    notify('Code sent! Check your inbox ✉️','good',5000);
     return true;
   }catch(e){
-    notify('Network error sending code','bad');
+    const msg='Network error. Check your connection.';
+    notify('⚠ '+msg,'bad');
+    if(errorElId) authErr(errorElId, msg);
     return false;
   }
 }
@@ -1433,6 +1466,15 @@ async function verifyNewOTP(){
 function loginAdminException(){
   me={username:pendingUsername,type:'registered',email:null};
   localStorage.setItem('rps_session',JSON.stringify(me));
+
+  // Navigate immediately
+  $('ub-name').textContent=pendingUsername;
+  $('ub-badge').textContent='Registered';
+  $('ub-badge').className='badge badge-registered';
+  showPage('page-lobby');
+  showFriendsToggle();
+
+  // Tell socket in background
   socket.emit('identify',{type:'registered',username:pendingUsername});
 }
 
@@ -1449,16 +1491,20 @@ async function adminLogin(){
     const d=await res.json();
     if(!d.ok){authErr('auth-error-admin',d.error||'Wrong password.');return;}
 
-    // Set state
     adminPassword=pass;
-    me={username:'dumber.4mir',type:'admin'};
+    me={username:ADMIN_USERNAME,type:'registered',isAdmin:true};
     localStorage.setItem('rps_session',JSON.stringify({...me,adminPass:pass}));
 
-    // Go to admin page immediately — don't wait for socket
-    showPage('page-admin');
-    adminRefresh();
+    // Go to lobby as real player
+    $('ub-name').textContent=ADMIN_USERNAME;
+    $('ub-badge').textContent='Admin';
+    $('ub-badge').className='badge badge-registered';
+    const adminBtn=$('btn-admin-panel');
+    if(adminBtn) adminBtn.style.display='';
+    showPage('page-lobby');
+    showFriendsToggle();
 
-    // Also tell socket in background
+    // Tell socket
     socket.emit('identify',{type:'admin'});
   }catch(e){
     authErr('auth-error-admin','Network error: '+e.message);
@@ -1476,11 +1522,17 @@ function loginSuccess(user){
   $('ub-badge').textContent='Registered';
   $('ub-badge').className='badge badge-registered';
   showPage('page-lobby');
-  $('friends-toggle').classList.add('visible');
-  loadFriends();
+  showFriendsToggle();
 
   // Tell socket in background
   socket.emit('identify',{type:'registered',email:user.email,username:user.username});
+}
+
+function showFriendsToggle(){
+  if(me && me.type==='registered'){
+    $('friends-toggle').classList.add('visible');
+    loadFriends();
+  }
 }
 
 // ══════════════════════════════════════════════════════ GUEST
@@ -1512,8 +1564,16 @@ window.addEventListener('load',()=>{
     const s=JSON.parse(saved);
     if(!s||!s.username||!s.type)return;
     me=s;
-    if(s.type==='admin'&&s.adminPass){
+    if(s.username===ADMIN_USERNAME&&s.adminPass){
       adminPassword=s.adminPass;
+      // Show admin button immediately
+      $('ub-name').textContent=ADMIN_USERNAME;
+      $('ub-badge').textContent='Admin';
+      $('ub-badge').className='badge badge-registered';
+      const adminBtn=$('btn-admin-panel');
+      if(adminBtn) adminBtn.style.display='';
+      showPage('page-lobby');
+      showFriendsToggle();
       socket.emit('identify',{type:'admin'});
     } else {
       socket.emit('identify',{type:s.type,email:s.email,username:s.username});
@@ -1521,24 +1581,25 @@ window.addEventListener('load',()=>{
   }catch(e){localStorage.removeItem('rps_session');}
 });
 
-socket.on('identified',({username,leaderboard,isAdmin})=>{
+socket.on('identified',({username,leaderboard,isAdmin,ip})=>{
   me=me||{};
   me.username=username;
+  me.isAdmin=isAdmin||false;
+  if(ip) me.ip=ip; // store guest IP for profile updates
   updateLBs(leaderboard||[]);
-  if(isAdmin){
-    showPage('page-admin');
-    adminRefresh();
-    return;
+  const currentPage=document.querySelector('.page.active')?.id;
+  if(currentPage==='page-auth'){
+    $('ub-name').textContent=username;
+    $('ub-badge').textContent=me.type==='registered'?'Registered':'Guest';
+    $('ub-badge').className='badge '+(me.type==='registered'?'badge-registered':'badge-guest');
+    showPage('page-lobby');
+    showFriendsToggle();
+  } else {
+    showFriendsToggle();
   }
-  $('ub-name').textContent=username;
-  $('ub-badge').textContent=me.type==='registered'?'Registered':'Guest';
-  $('ub-badge').className='badge '+(me.type==='registered'?'badge-registered':'badge-guest');
-  showPage('page-lobby');
-  // show friends toggle for registered users
-  if(me.type==='registered'){
-    $('friends-toggle').classList.add('visible');
-    loadFriends();
-  }
+  // Show admin button if admin
+  const adminBtn=$('btn-admin-panel');
+  if(adminBtn) adminBtn.style.display=isAdmin?'':'none';
 });
 
 socket.on('auth_error',msg=>{
@@ -1551,14 +1612,26 @@ socket.on('auth_error',msg=>{
   authErr('auth-error', msg);
 });
 
+function openAdminPanel(){
+  prevPage = document.querySelector('.page.active')?.id || 'page-lobby';
+  showPage('page-admin');
+  adminRefresh();
+}
+
 function logout(){
   localStorage.removeItem('rps_session');
   me=null; adminPassword=null;
+  $('friends-toggle').classList.remove('visible');
+  const adminBtn=$('btn-admin-panel');
+  if(adminBtn) adminBtn.style.display='none';
   showPage('page-auth');
   showLoginStep('step-username-check');
   $('inp-username').value='';
 }
-function adminLogout(){ logout(); }
+function adminLogout(){
+  // Go back to lobby, not full logout
+  showPage('page-lobby');
+}
 
 // ══════════════════════════════════════════════════════ ADMIN PANEL
 function adminHeader(){ return {'Content-Type':'application/json','x-admin-password':adminPassword}; }
@@ -1640,18 +1713,28 @@ async function adminAction(action,username){
   }catch(e){notify('Error','bad');}
 }
 
-async function adminAddUser(){
+async function adminAddUser(forceRelease=false){
   const username=$('inp-admin-new-user').value.trim();
   if(!username){notify('Enter a username','bad');return;}
   try{
-    const res=await fetch('/admin/add-user',{method:'POST',headers:adminHeader(),body:JSON.stringify({username})});
+    const res=await fetch('/admin/add-user',{
+      method:'POST',headers:adminHeader(),
+      body:JSON.stringify({username,forceRelease})
+    });
     const d=await res.json();
     if(d.ok){
-      $('admin-add-msg').innerHTML=`<span style="color:var(--green)">✓ User "${username}" added. They can now log in without email.</span>`;
+      $('admin-add-msg').innerHTML=`<span style="color:var(--green)">✓ User "@${username}" added. They can log in without email.</span>`;
       $('inp-admin-new-user').value='';
       adminRefresh();
+    } else if(d.guestConflict){
+      $('admin-add-msg').innerHTML=`
+        <span style="color:var(--gold)">⚠ ${d.error}</span><br>
+        <div style="margin-top:8px;display:flex;gap:8px;">
+          <button class="btn btn-danger btn-sm" onclick="adminAddUser(true)">Force Release & Add</button>
+          <button class="btn btn-ghost btn-sm" onclick="$('admin-add-msg').innerHTML=''">Cancel</button>
+        </div>`;
     } else {
-      $('admin-add-msg').innerHTML=`<span style="color:var(--red)">${d.error}</span>`;
+      $('admin-add-msg').innerHTML=`<span style="color:var(--red)">✗ ${d.error}</span>`;
     }
   }catch(e){notify('Error','bad');}
 }
@@ -1866,7 +1949,7 @@ function myHeader(){ return { 'Content-Type':'application/json', 'x-username': m
 function toggleSidebar(){
   const sb = $('friends-sidebar');
   const open = sb.classList.toggle('open');
-  if(open && me && me.type !== 'admin') loadFriends();
+  if(open && me && me.type === 'registered') loadFriends();
 }
 
 function showSidebarForRegistered(){
@@ -1875,6 +1958,9 @@ function showSidebarForRegistered(){
     loadFriends();
   }
 }
+
+// alias so both names work
+function showFriendsToggle(){ showSidebarForRegistered(); }
 
 // ── Tabs ──────────────────────────────────────────────────────────
 function fsbTab(tab){
@@ -1966,31 +2052,38 @@ let searchTimer;
 function searchUsers(q){
   clearTimeout(searchTimer);
   const res = $('fsb-search-results');
-  if(q.length < 2){ res.innerHTML=''; return; }
+  if(!q || q.length < 2){ res.innerHTML='<div class="fsb-empty" style="font-size:.72rem">Type at least 2 characters to search.</div>'; return; }
+  if(!me || me.type !== 'registered'){ res.innerHTML='<div class="fsb-empty">Log in to search users.</div>'; return; }
+  res.innerHTML='<div class="fsb-empty">Searching…</div>';
   searchTimer = setTimeout(async ()=>{
     try{
       const r = await fetch('/friends/search',{
-        method:'POST', headers:myHeader(),
-        body: JSON.stringify({ query: q, me: me?.username })
+        method:'POST',
+        headers:{'Content-Type':'application/json','x-username':me.username},
+        body: JSON.stringify({ query: q, me: me.username })
       });
       const users = await r.json();
       if(!users.length){ res.innerHTML='<div class="fsb-empty">No users found.</div>'; return; }
       res.innerHTML = users.map(u=>{
         const isFriend = friendsData.some(f=>f.username===u.username);
         const isPending = pendingData.includes(u.username);
+        const isSelf = u.username === me.username;
+        const guestTag = u.type==='guest' ? ` <span style="font-size:.55rem;color:var(--muted);background:var(--border);padding:1px 5px;border-radius:3px">guest</span>` : '';
         return `<div class="search-result">
           <div>
-            <div class="search-result-name">@${u.username}</div>
+            <div class="search-result-name" style="cursor:pointer;color:var(--accent)" onclick="openProfile('${u.username}')">@${u.username}${guestTag}</div>
             <div class="search-result-status">${u.status==='playing'?'🎮 Playing':u.status==='online'?'● Online':'○ Offline'}</div>
           </div>
-          ${isFriend
-            ? `<span style="font-size:.65rem;color:var(--green)">✓ Friends</span>`
-            : isPending
-              ? `<span style="font-size:.65rem;color:var(--muted)">Sent</span>`
-              : `<button class="btn btn-primary btn-sm" onclick="sendFriendRequest('${u.username}')">Add Friend</button>`}
+          ${isSelf
+            ? `<span style="font-size:.65rem;color:var(--muted)">You</span>`
+            : isFriend
+              ? `<span style="font-size:.65rem;color:var(--green)">✓ Friends</span>`
+              : isPending
+                ? `<span style="font-size:.65rem;color:var(--muted)">Request Sent</span>`
+                : `<button class="btn btn-primary btn-sm" onclick="sendFriendRequest('${u.username}')">Add Friend</button>`}
         </div>`;
       }).join('');
-    }catch(e){}
+    }catch(e){ res.innerHTML='<div class="fsb-empty">Search failed. Try again.</div>'; }
   }, 350);
 }
 
@@ -2224,27 +2317,36 @@ async function openProfile(username){
   const isOwn = me && username === me.username;
   $('profile-viewing-label').textContent = isOwn ? 'Your profile' : `@${username}'s profile`;
   $('btn-edit-profile').style.display = isOwn ? '' : 'none';
-  $('push-toggle-wrap').style.display = isOwn ? '' : 'none';
+  $('push-toggle-wrap').style.display = (isOwn && me?.type==='registered') ? '' : 'none';
   showPage('page-profile');
   await loadProfile(username);
-  if(isOwn) updatePushToggleUI();
+  if(isOwn && me?.type==='registered') updatePushToggleUI();
 }
 
 function closeProfile(){
   showPage(prevPage);
-  // re-show friends toggle if needed
   if(me?.type==='registered') $('friends-toggle').classList.add('visible');
 }
 
 async function loadProfile(username){
   try{
-    const r = await fetch(`/profile/${username}`);
-    if(!r.ok){ notify('Profile not found','bad'); return; }
+    const r = await fetch(`/profile/${encodeURIComponent(username)}`);
     const p = await r.json();
+    if(!r.ok){
+      $('profile-username').textContent = username;
+      $('profile-bio').textContent = p.error || 'Profile not available.';
+      $('prof-wins').textContent='—'; $('prof-losses').textContent='—';
+      $('prof-draws').textContent='—'; $('prof-winpct').textContent='—';
+      $('profile-badges').innerHTML='';
+      $('profile-history').innerHTML='<tr><td colspan="4" class="lb-empty">No data available.</td></tr>';
+      return;
+    }
 
-    // avatar
+    // avatar_emoji stored as 'game' in old rows — map back to emoji
+    const emojiMap = { game:'🎮' };
+    const emoji = emojiMap[p.avatar_emoji] || p.avatar_emoji || '🎮';
     const av = $('profile-avatar-big');
-    av.textContent = p.avatar_emoji || '🎮';
+    av.textContent = emoji;
     av.style.background = p.avatar_color || '#7c6aff';
 
     $('profile-username').textContent = p.username;
@@ -2261,7 +2363,9 @@ async function loadProfile(username){
 
     renderProfileBadges(p.badges);
     renderMatchHistory(p.history);
-  }catch(e){ notify('Error loading profile','bad'); }
+  }catch(e){
+    notify('Error loading profile: '+e.message,'bad');
+  }
 }
 
 function renderProfileBadges(earned){
@@ -2338,14 +2442,24 @@ function updateAvatarPreview(){
 async function saveProfile(){
   const bio = $('inp-bio').value.trim();
   try{
-    await fetch('/profile/update',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ username: me.username, bio, avatar_emoji: editAvatar.emoji, avatar_color: editAvatar.color })
+    const body = {
+      username: me.username,
+      bio,
+      avatar_emoji: editAvatar.emoji,
+      avatar_color: editAvatar.color,
+    };
+    if(me.type === 'guest' && me.ip) body.ip = me.ip;
+    const r = await fetch('/profile/update',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
     });
+    const d = await r.json();
+    if(!d.ok){ notify(d.error||'Error saving','bad'); return; }
     $('edit-profile-modal').classList.remove('active');
     await loadProfile(me.username);
     notify('Profile updated!','good');
-  }catch(e){ notify('Error saving','bad'); }
+  }catch(e){ notify('Error saving: '+e.message,'bad'); }
 }
 
 // ══════════════════════════════════════════════════════ REACTIONS
