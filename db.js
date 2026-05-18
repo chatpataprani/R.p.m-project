@@ -3,111 +3,390 @@ const { Pool } = require("pg");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // required on Render
+  ssl: { rejectUnauthorized: false },
 });
 
-// ── Boot: create tables if they don't exist ───────────────────────────────
 async function init() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
-      id        SERIAL PRIMARY KEY,
-      email     TEXT UNIQUE NOT NULL,
-      username  TEXT UNIQUE NOT NULL,
-      created   BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-      wins      INTEGER DEFAULT 0,
-      losses    INTEGER DEFAULT 0,
-      draws     INTEGER DEFAULT 0
+      id            SERIAL PRIMARY KEY,
+      email         TEXT UNIQUE,
+      username      TEXT UNIQUE NOT NULL,
+      created       BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+      wins          INTEGER DEFAULT 0,
+      losses        INTEGER DEFAULT 0,
+      draws         INTEGER DEFAULT 0,
+      banned        BOOLEAN DEFAULT FALSE,
+      admin_created BOOLEAN DEFAULT FALSE,
+      bio           TEXT DEFAULT '',
+      avatar_emoji  TEXT DEFAULT '🎮',
+      avatar_color  TEXT DEFAULT '#7c6aff',
+      win_streak    INTEGER DEFAULT 0,
+      best_streak   INTEGER DEFAULT 0,
+      push_sub      TEXT DEFAULT NULL
     );
 
     CREATE TABLE IF NOT EXISTS guests (
-      ip        TEXT PRIMARY KEY,
-      username  TEXT NOT NULL,
-      wins      INTEGER DEFAULT 0,
-      losses    INTEGER DEFAULT 0,
-      draws     INTEGER DEFAULT 0,
-      updated   BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+      ip       TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      wins     INTEGER DEFAULT 0,
+      losses   INTEGER DEFAULT 0,
+      draws    INTEGER DEFAULT 0,
+      updated  BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
     );
 
     CREATE TABLE IF NOT EXISTS otps (
-      email     TEXT PRIMARY KEY,
-      code      TEXT NOT NULL,
-      expires   BIGINT NOT NULL
+      email   TEXT PRIMARY KEY,
+      code    TEXT NOT NULL,
+      expires BIGINT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS match_history (
+      id         SERIAL PRIMARY KEY,
+      username   TEXT NOT NULL,
+      opponent   TEXT NOT NULL,
+      result     TEXT NOT NULL,
+      my_score   INTEGER DEFAULT 0,
+      opp_score  INTEGER DEFAULT 0,
+      goal       INTEGER DEFAULT 0,
+      played_at  BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+    );
+
+    CREATE TABLE IF NOT EXISTS badges (
+      id         SERIAL PRIMARY KEY,
+      username   TEXT NOT NULL,
+      badge_key  TEXT NOT NULL,
+      earned_at  BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+      UNIQUE(username, badge_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS push_subs (
+      username   TEXT PRIMARY KEY,
+      sub        TEXT NOT NULL,
+      updated    BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
     );
   `);
-  console.log("DB tables ready.");
+
+  // Add new columns to existing deployments without breaking them
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_emoji TEXT DEFAULT '🎮';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_color TEXT DEFAULT '#7c6aff';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS win_streak INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS best_streak INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS push_sub TEXT DEFAULT NULL;
+  `).catch(()=>{});
+
+  console.log("DB ready.");
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────
-async function getUserByEmail(email) {
-  const r = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
-  return r.rows[0] || null;
-}
+const q = (sql, p) => pool.query(sql, p);
 
-async function getUserByUsername(username) {
-  const r = await pool.query("SELECT * FROM users WHERE username = $1", [username]);
-  return r.rows[0] || null;
+async function getUserByEmail(email)       { return (await q("SELECT * FROM users WHERE email=$1",[email])).rows[0]||null; }
+async function getUserByUsername(username) { return (await q("SELECT * FROM users WHERE username=$1",[username])).rows[0]||null; }
+async function createUser(email,username,adminCreated=false){
+  await q("INSERT INTO users(email,username,admin_created) VALUES($1,$2,$3)",[email||null,username,adminCreated]);
 }
-
-async function createUser(email, username) {
-  await pool.query("INSERT INTO users (email, username) VALUES ($1, $2)", [email, username]);
-}
-
-async function addUserWin(email)  { await pool.query("UPDATE users SET wins   = wins   + 1 WHERE email = $1", [email]); }
-async function addUserLoss(email) { await pool.query("UPDATE users SET losses = losses + 1 WHERE email = $1", [email]); }
-async function addUserDraw(email) { await pool.query("UPDATE users SET draws  = draws  + 1 WHERE email = $1", [email]); }
+async function addUserWin(email)   { await q("UPDATE users SET wins=wins+1 WHERE email=$1",[email]); }
+async function addUserLoss(email)  { await q("UPDATE users SET losses=losses+1 WHERE email=$1",[email]); }
+async function addUserDraw(email)  { await q("UPDATE users SET draws=draws+1 WHERE email=$1",[email]); }
+async function addUserWinByName(u)  { await q("UPDATE users SET wins=wins+1 WHERE username=$1",[u]); }
+async function addUserLossByName(u) { await q("UPDATE users SET losses=losses+1 WHERE username=$1",[u]); }
+async function addUserDrawByName(u) { await q("UPDATE users SET draws=draws+1 WHERE username=$1",[u]); }
+async function banUser(username)   { await q("UPDATE users SET banned=TRUE WHERE username=$1",[username]); }
+async function unbanUser(username) { await q("UPDATE users SET banned=FALSE WHERE username=$1",[username]); }
+async function deleteUser(username){ await q("DELETE FROM users WHERE username=$1",[username]); }
+async function getAllUsers()       { return (await q("SELECT id,email,username,wins,losses,draws,banned,admin_created,created FROM users ORDER BY created DESC")).rows; }
 
 // ── Guests ────────────────────────────────────────────────────────────────
-async function getGuest(ip) {
-  const r = await pool.query("SELECT * FROM guests WHERE ip = $1", [ip]);
-  return r.rows[0] || null;
+async function upsertGuest(ip,username){
+  await q(`INSERT INTO guests(ip,username) VALUES($1,$2)
+    ON CONFLICT(ip) DO UPDATE SET username=$2,updated=EXTRACT(EPOCH FROM NOW())`,[ip,username]);
 }
-
-async function upsertGuest(ip, username) {
-  await pool.query(`
-    INSERT INTO guests (ip, username) VALUES ($1, $2)
-    ON CONFLICT (ip) DO UPDATE SET username = $2, updated = EXTRACT(EPOCH FROM NOW())
-  `, [ip, username]);
-}
-
-async function addGuestWin(ip)  { await pool.query("UPDATE guests SET wins   = wins   + 1 WHERE ip = $1", [ip]); }
-async function addGuestLoss(ip) { await pool.query("UPDATE guests SET losses = losses + 1 WHERE ip = $1", [ip]); }
-async function addGuestDraw(ip) { await pool.query("UPDATE guests SET draws  = draws  + 1 WHERE ip = $1", [ip]); }
+async function addGuestWin(ip)  { await q("UPDATE guests SET wins=wins+1 WHERE ip=$1",[ip]); }
+async function addGuestLoss(ip) { await q("UPDATE guests SET losses=losses+1 WHERE ip=$1",[ip]); }
+async function addGuestDraw(ip) { await q("UPDATE guests SET draws=draws+1 WHERE ip=$1",[ip]); }
 
 // ── OTPs ──────────────────────────────────────────────────────────────────
-async function upsertOTP(email, code, expires) {
-  await pool.query(`
-    INSERT INTO otps (email, code, expires) VALUES ($1, $2, $3)
-    ON CONFLICT (email) DO UPDATE SET code = $2, expires = $3
-  `, [email, code, expires]);
+async function upsertOTP(email,code,expires){
+  await q(`INSERT INTO otps(email,code,expires) VALUES($1,$2,$3)
+    ON CONFLICT(email) DO UPDATE SET code=$2,expires=$3`,[email,code,expires]);
 }
-
-async function getOTP(email) {
-  const r = await pool.query("SELECT * FROM otps WHERE email = $1", [email]);
-  return r.rows[0] || null;
-}
-
-async function deleteOTP(email) {
-  await pool.query("DELETE FROM otps WHERE email = $1", [email]);
-}
+async function getOTP(email)    { return (await q("SELECT * FROM otps WHERE email=$1",[email])).rows[0]||null; }
+async function deleteOTP(email) { await q("DELETE FROM otps WHERE email=$1",[email]); }
 
 // ── Leaderboard ───────────────────────────────────────────────────────────
-async function getLeaderboard() {
-  const r = await pool.query(`
-    SELECT username, wins, losses, draws,
-ROUND(((CAST(wins AS FLOAT) / GREATEST(wins+losses+draws, 1) * 100))::numeric, 1) AS win_pct
-FROM users
-ORDER BY wins DESC, win_pct DESC
-LIMIT 20
-  `);
-  return r.rows;
+async function getLeaderboard(){
+  return (await q(`
+    SELECT username,wins,losses,draws,
+      ROUND(CAST(wins AS FLOAT)/GREATEST(wins+losses+draws,1)*100,1) AS win_pct
+    FROM users WHERE banned=FALSE
+    ORDER BY wins DESC,win_pct DESC LIMIT 20`)).rows;
 }
 
 module.exports = {
   init,
-  getUserByEmail, getUserByUsername, createUser,
-  addUserWin, addUserLoss, addUserDraw,
-  getGuest, upsertGuest,
-  addGuestWin, addGuestLoss, addGuestDraw,
-  upsertOTP, getOTP, deleteOTP,
+  getUserByEmail,getUserByUsername,createUser,
+  addUserWin,addUserLoss,addUserDraw,
+  addUserWinByName,addUserLossByName,addUserDrawByName,
+  banUser,unbanUser,deleteUser,getAllUsers,
+  upsertGuest,addGuestWin,addGuestLoss,addGuestDraw,
+  upsertOTP,getOTP,deleteOTP,
   getLeaderboard,
 };
+
+// ── Friends & Messages ────────────────────────────────────────────────────
+async function initFriends() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS friendships (
+      id         SERIAL PRIMARY KEY,
+      requester  TEXT NOT NULL,
+      addressee  TEXT NOT NULL,
+      status     TEXT DEFAULT 'pending',
+      nickname   TEXT DEFAULT NULL,
+      created    BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+      UNIQUE(requester, addressee)
+    );
+    CREATE TABLE IF NOT EXISTS messages (
+      id         SERIAL PRIMARY KEY,
+      sender     TEXT NOT NULL,
+      receiver   TEXT NOT NULL,
+      body       TEXT NOT NULL,
+      seen       BOOLEAN DEFAULT FALSE,
+      created    BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+    );
+  `);
+}
+
+async function sendFriendRequest(from, to) {
+  await pool.query(
+    `INSERT INTO friendships (requester, addressee) VALUES ($1, $2)
+     ON CONFLICT (requester, addressee) DO NOTHING`, [from, to]);
+}
+
+async function respondFriendRequest(from, to, accept) {
+  if (accept) {
+    await pool.query(
+      `UPDATE friendships SET status='accepted' WHERE requester=$1 AND addressee=$2`, [from, to]);
+  } else {
+    await pool.query(
+      `DELETE FROM friendships WHERE requester=$1 AND addressee=$2`, [from, to]);
+  }
+}
+
+async function removeFriend(a, b) {
+  await pool.query(
+    `DELETE FROM friendships WHERE (requester=$1 AND addressee=$2) OR (requester=$2 AND addressee=$1)`, [a, b]);
+}
+
+async function setNickname(me, friend, nickname) {
+  // store nickname on the row where I am requester or addressee
+  await pool.query(`
+    UPDATE friendships SET nickname=$3
+    WHERE (requester=$1 AND addressee=$2) OR (requester=$2 AND addressee=$1)
+      AND status='accepted'
+  `, [me, friend, nickname || null]);
+}
+
+async function getFriends(username) {
+  const r = await pool.query(`
+    SELECT
+      CASE WHEN requester=$1 THEN addressee ELSE requester END AS friend,
+      status,
+      requester,
+      addressee,
+      nickname,
+      created
+    FROM friendships
+    WHERE (requester=$1 OR addressee=$1)
+    ORDER BY created DESC
+  `, [username]);
+  return r.rows;
+}
+
+async function getPendingRequests(username) {
+  const r = await pool.query(`
+    SELECT requester, created FROM friendships
+    WHERE addressee=$1 AND status='pending'
+    ORDER BY created DESC
+  `, [username]);
+  return r.rows;
+}
+
+async function areFriends(a, b) {
+  const r = await pool.query(
+    `SELECT 1 FROM friendships WHERE ((requester=$1 AND addressee=$2) OR (requester=$2 AND addressee=$1)) AND status='accepted'`,
+    [a, b]);
+  return r.rows.length > 0;
+}
+
+async function saveMessage(sender, receiver, body) {
+  const r = await pool.query(
+    `INSERT INTO messages (sender, receiver, body) VALUES ($1, $2, $3) RETURNING *`,
+    [sender, receiver, body]);
+  return r.rows[0];
+}
+
+async function getMessages(a, b, limit = 50) {
+  const r = await pool.query(`
+    SELECT * FROM messages
+    WHERE (sender=$1 AND receiver=$2) OR (sender=$2 AND receiver=$1)
+    ORDER BY created DESC LIMIT $3
+  `, [a, b, limit]);
+  return r.rows.reverse();
+}
+
+async function markSeen(sender, receiver) {
+  await pool.query(
+    `UPDATE messages SET seen=TRUE WHERE sender=$1 AND receiver=$2 AND seen=FALSE`,
+    [sender, receiver]);
+}
+
+async function getUnseenCounts(username) {
+  const r = await pool.query(`
+    SELECT sender, COUNT(*) AS cnt FROM messages
+    WHERE receiver=$1 AND seen=FALSE
+    GROUP BY sender
+  `, [username]);
+  return r.rows; // [{sender, cnt}]
+}
+
+module.exports.initFriends          = initFriends;
+module.exports.sendFriendRequest    = sendFriendRequest;
+module.exports.respondFriendRequest = respondFriendRequest;
+module.exports.removeFriend         = removeFriend;
+module.exports.setNickname          = setNickname;
+module.exports.getFriends           = getFriends;
+module.exports.getPendingRequests   = getPendingRequests;
+module.exports.areFriends           = areFriends;
+module.exports.saveMessage          = saveMessage;
+module.exports.getMessages          = getMessages;
+module.exports.markSeen             = markSeen;
+module.exports.getUnseenCounts      = getUnseenCounts;
+
+// ── Profile ───────────────────────────────────────────────────────────────
+async function getProfile(username) {
+  const r = await pool.query(`SELECT * FROM users WHERE username=$1`, [username]);
+  return r.rows[0] || null;
+}
+
+async function updateProfile(username, { bio, avatar_emoji, avatar_color }) {
+  await pool.query(
+    `UPDATE users SET bio=$2, avatar_emoji=$3, avatar_color=$4 WHERE username=$1`,
+    [username, (bio||'').slice(0,160), avatar_emoji||'🎮', avatar_color||'#7c6aff']);
+}
+
+// ── Match history ─────────────────────────────────────────────────────────
+async function addMatchHistory(username, opponent, result, myScore, oppScore, goal) {
+  await pool.query(
+    `INSERT INTO match_history (username,opponent,result,my_score,opp_score,goal)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [username, opponent, result, myScore, oppScore, goal]);
+}
+
+async function getMatchHistory(username, limit=20) {
+  const r = await pool.query(
+    `SELECT * FROM match_history WHERE username=$1 ORDER BY played_at DESC LIMIT $2`,
+    [username, limit]);
+  return r.rows;
+}
+
+// ── Streaks ───────────────────────────────────────────────────────────────
+async function recordStreakWin(username) {
+  await pool.query(`
+    UPDATE users
+    SET win_streak = win_streak + 1,
+        best_streak = GREATEST(best_streak, win_streak + 1)
+    WHERE username=$1`, [username]);
+}
+async function resetStreak(username) {
+  await pool.query(`UPDATE users SET win_streak=0 WHERE username=$1`, [username]);
+}
+
+// ── Badges ────────────────────────────────────────────────────────────────
+const BADGE_DEFS = [
+  { key:'first_win',    label:'First Blood',    icon:'🩸', desc:'Win your first match' },
+  { key:'wins_10',      label:'Rising Star',    icon:'⭐', desc:'Win 10 matches' },
+  { key:'wins_50',      label:'Veteran',        icon:'🎖️', desc:'Win 50 matches' },
+  { key:'wins_100',     label:'Legend',         icon:'🏆', desc:'Win 100 matches' },
+  { key:'streak_5',     label:'On Fire',        icon:'🔥', desc:'Win 5 in a row' },
+  { key:'streak_10',    label:'Unstoppable',    icon:'⚡', desc:'Win 10 in a row' },
+  { key:'draw_master',  label:'Draw Master',    icon:'🤝', desc:'Draw 10 matches' },
+  { key:'centurion',    label:'Centurion',      icon:'⚔️', desc:'Play 100 matches' },
+  { key:'social',       label:'Social Butterfly',icon:'🦋', desc:'Add 5 friends' },
+];
+module.exports.BADGE_DEFS = BADGE_DEFS;
+
+async function awardBadge(username, badge_key) {
+  await pool.query(
+    `INSERT INTO badges (username, badge_key) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+    [username, badge_key]);
+}
+
+async function getUserBadges(username) {
+  const r = await pool.query(
+    `SELECT badge_key, earned_at FROM badges WHERE username=$1 ORDER BY earned_at ASC`,
+    [username]);
+  return r.rows;
+}
+
+async function checkAndAwardBadges(username) {
+  const user = await getProfile(username);
+  if (!user) return [];
+  const existing = (await getUserBadges(username)).map(b=>b.badge_key);
+  const newBadges = [];
+  const total = user.wins + user.losses + user.draws;
+
+  const check = async (key) => {
+    if (!existing.includes(key)) { await awardBadge(username, key); newBadges.push(key); }
+  };
+
+  if (user.wins >= 1)   await check('first_win');
+  if (user.wins >= 10)  await check('wins_10');
+  if (user.wins >= 50)  await check('wins_50');
+  if (user.wins >= 100) await check('wins_100');
+  if (user.win_streak >= 5)  await check('streak_5');
+  if (user.win_streak >= 10) await check('streak_10');
+  if (user.draws >= 10) await check('draw_master');
+  if (total >= 100)     await check('centurion');
+
+  // social badge — check friend count
+  const fc = await pool.query(
+    `SELECT COUNT(*) FROM friendships WHERE (requester=$1 OR addressee=$1) AND status='accepted'`,
+    [username]);
+  if (parseInt(fc.rows[0].count) >= 5) await check('social');
+
+  return newBadges;
+}
+
+// ── Push subscriptions ────────────────────────────────────────────────────
+async function savePushSub(username, sub) {
+  await pool.query(
+    `INSERT INTO push_subs (username, sub) VALUES ($1,$2)
+     ON CONFLICT (username) DO UPDATE SET sub=$2, updated=EXTRACT(EPOCH FROM NOW())`,
+    [username, JSON.stringify(sub)]);
+}
+
+async function getPushSub(username) {
+  const r = await pool.query(`SELECT sub FROM push_subs WHERE username=$1`, [username]);
+  return r.rows[0] ? JSON.parse(r.rows[0].sub) : null;
+}
+
+async function deletePushSub(username) {
+  await pool.query(`DELETE FROM push_subs WHERE username=$1`, [username]);
+}
+
+module.exports.getProfile          = getProfile;
+module.exports.updateProfile       = updateProfile;
+module.exports.addMatchHistory     = addMatchHistory;
+module.exports.getMatchHistory     = getMatchHistory;
+module.exports.recordStreakWin     = recordStreakWin;
+module.exports.resetStreak         = resetStreak;
+module.exports.awardBadge          = awardBadge;
+module.exports.getUserBadges       = getUserBadges;
+module.exports.checkAndAwardBadges = checkAndAwardBadges;
+module.exports.savePushSub         = savePushSub;
+module.exports.getPushSub          = getPushSub;
+module.exports.deletePushSub       = deletePushSub;
+module.exports.pool                = pool;
