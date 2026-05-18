@@ -84,3 +84,41 @@ Your app will be at: `https://rps-game.onrender.com`
 | 📊 Round History | W/L/D dots + live score |
 | 🏆 Leaderboard | Registered players, all-time wins |
 | 💾 PostgreSQL | Persistent data on Render |
+
+---
+
+## 🔔 Push Notifications Setup (VAPID Keys)
+
+Run this once locally to generate your keys:
+```bash
+cd rps-game-v2
+npm install
+node -e "const wp=require('web-push');const k=wp.generateVAPIDKeys();console.log('VAPID_PUBLIC='+k.publicKey+'\nVAPID_PRIVATE='+k.privateKey)"
+```
+
+Copy the output and add both as Render environment variables:
+| Key | Value |
+|-----|-------|
+| `VAPID_PUBLIC` | the publicKey output |
+| `VAPID_PRIVATE` | the privateKey output |
+
+Push notifications will then work for:
+- 👋 Friend requests
+- 💬 Chat messages (when offline)
+- ⚔️ Play invites (when offline)
+
+If you skip this step the app still works — push notifications are just disabled.
+
+---
+
+## 🆕 v3 Features
+| Feature | Details |
+|---|---|
+| 👤 Public profiles | `/profile/:username` — avatar, bio, stats, badges, match history |
+| 🏅 Badges | 9 auto-unlocked badges based on wins, streaks, draws, friends |
+| 📜 Match history | Last 20 games stored per player |
+| 🔥 Win streaks | Live streak + best streak tracked |
+| 👊 Reactions | 8 emojis after each round, float animation for opponent |
+| 🔔 Push notifications | VAPID-based, friend requests/messages/invites |
+| 📱 PWA | Installable on phone via browser "Add to Home Screen" |
+| 🖱️ Clickable leaderboard | Tap any username to view their profile |
