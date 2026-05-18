@@ -78,6 +78,8 @@ async function init() {
 
   // Migrate existing deployments — add new columns one by one safely
   const alters = [
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_created BOOLEAN DEFAULT FALSE`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT ''`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_emoji TEXT DEFAULT 'game'`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_color TEXT DEFAULT '#7c6aff'`,
