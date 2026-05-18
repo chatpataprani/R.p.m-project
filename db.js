@@ -117,12 +117,14 @@ async function getOTP(email)    { return (await q("SELECT * FROM otps WHERE emai
 async function deleteOTP(email) { await q("DELETE FROM otps WHERE email=$1",[email]); }
 
 // ── Leaderboard ───────────────────────────────────────────────────────────
-async function getLeaderboard(){
-  return (await q(`
-    SELECT username,wins,losses,draws,
-      ROUND(CAST(wins AS FLOAT)/GREATEST(wins+losses+draws,1)*100,1) AS win_pct
+async function getLeaderboard() {
+  const r = await pool.query(`
+    SELECT username, wins, losses, draws,
+      ROUND((CAST(wins AS NUMERIC) / GREATEST(wins+losses+draws, 1) * 100)::NUMERIC, 1) AS win_pct
     FROM users WHERE banned=FALSE
-    ORDER BY wins DESC,win_pct DESC LIMIT 20`)).rows;
+    ORDER BY wins DESC, win_pct DESC LIMIT 20
+  `);
+  return r.rows;
 }
 
 module.exports = {
