@@ -85,6 +85,7 @@ async function init() {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_color TEXT DEFAULT '#7c6aff'`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS win_streak INTEGER DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS best_streak INTEGER DEFAULT 0`,
+    `ALTER TABLE users ALTER COLUMN email DROP NOT NULL`,
   ];
   for (const sql of alters) {
     await pool.query(sql).catch(() => {}); // ignore if column already exists
