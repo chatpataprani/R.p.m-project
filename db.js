@@ -28,14 +28,31 @@ async function init() {
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS guests (
-      ip       TEXT PRIMARY KEY,
-      username TEXT NOT NULL,
-      wins     INTEGER DEFAULT 0,
-      losses   INTEGER DEFAULT 0,
-      draws    INTEGER DEFAULT 0,
-      updated  BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+      ip           TEXT PRIMARY KEY,
+      username     TEXT NOT NULL,
+      wins         INTEGER DEFAULT 0,
+      losses       INTEGER DEFAULT 0,
+      draws        INTEGER DEFAULT 0,
+      win_streak   INTEGER DEFAULT 0,
+      best_streak  INTEGER DEFAULT 0,
+      bio          TEXT DEFAULT '',
+      avatar_emoji TEXT DEFAULT '🎮',
+      avatar_color TEXT DEFAULT '#7c6aff',
+      updated      BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
     )
   `);
+
+  // Migrate existing guest rows
+  const guestAlters = [
+    `ALTER TABLE guests ADD COLUMN IF NOT EXISTS win_streak INTEGER DEFAULT 0`,
+    `ALTER TABLE guests ADD COLUMN IF NOT EXISTS best_streak INTEGER DEFAULT 0`,
+    `ALTER TABLE guests ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT ''`,
+    `ALTER TABLE guests ADD COLUMN IF NOT EXISTS avatar_emoji TEXT DEFAULT '🎮'`,
+    `ALTER TABLE guests ADD COLUMN IF NOT EXISTS avatar_color TEXT DEFAULT '#7c6aff'`,
+  ];
+  for (const sql of guestAlters) {
+    await pool.query(sql).catch(()=>{});
+  }
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS otps (
@@ -114,13 +131,40 @@ async function deleteUser(username){ await q("DELETE FROM users WHERE username=$
 async function getAllUsers()       { return (await q("SELECT id,email,username,wins,losses,draws,banned,admin_created,created FROM users ORDER BY created DESC")).rows; }
 
 // ── Guests ────────────────────────────────────────────────────────────────
-async function upsertGuest(ip,username){
-  await q(`INSERT INTO guests(ip,username) VALUES($1,$2)
-    ON CONFLICT(ip) DO UPDATE SET username=$2,updated=EXTRACT(EPOCH FROM NOW())`,[ip,username]);
+async function upsertGuest(ip, username){
+  await q(`
+    INSERT INTO guests(ip, username) VALUES($1, $2)
+    ON CONFLICT(ip) DO UPDATE SET username=$2, updated=EXTRACT(EPOCH FROM NOW())
+  `, [ip, username]);
 }
-async function addGuestWin(ip)  { await q("UPDATE guests SET wins=wins+1 WHERE ip=$1",[ip]); }
-async function addGuestLoss(ip) { await q("UPDATE guests SET losses=losses+1 WHERE ip=$1",[ip]); }
-async function addGuestDraw(ip) { await q("UPDATE guests SET draws=draws+1 WHERE ip=$1",[ip]); }
+async function getGuest(ip){ return (await q("SELECT * FROM guests WHERE ip=$1",[ip])).rows[0]||null; }
+async function getGuestByUsername(username){ return (await q("SELECT * FROM guests WHERE username=$1",[username])).rows[0]||null; }
+async function addGuestWin(ip)  { await q("UPDATE guests SET wins=wins+1, win_streak=win_streak+1, best_streak=GREATEST(best_streak,win_streak+1), updated=EXTRACT(EPOCH FROM NOW()) WHERE ip=$1",[ip]); }
+async function addGuestLoss(ip) { await q("UPDATE guests SET losses=losses+1, win_streak=0, updated=EXTRACT(EPOCH FROM NOW()) WHERE ip=$1",[ip]); }
+async function addGuestDraw(ip) { await q("UPDATE guests SET draws=draws+1, updated=EXTRACT(EPOCH FROM NOW()) WHERE ip=$1",[ip]); }
+async function updateGuestProfile(ip, { bio, avatar_emoji, avatar_color }){
+  await q("UPDATE guests SET bio=$2, avatar_emoji=$3, avatar_color=$4, updated=EXTRACT(EPOCH FROM NOW()) WHERE ip=$1",
+    [ip, (bio||'').slice(0,160), avatar_emoji||'🎮', avatar_color||'#7c6aff']);
+}
+
+// Free guest usernames inactive for 5+ days
+async function expireInactiveGuests(){
+  const fiveDaysAgo = Math.floor(Date.now()/1000) - (5 * 24 * 60 * 60);
+  const r = await q("DELETE FROM guests WHERE updated < $1 RETURNING username", [fiveDaysAgo]);
+  if(r.rows.length > 0) console.log(`Expired ${r.rows.length} inactive guest(s):`, r.rows.map(x=>x.username));
+}
+
+// Check if a guest username is currently active (within 5 days)
+async function getActiveGuestByUsername(username){
+  const fiveDaysAgo = Math.floor(Date.now()/1000) - (5 * 24 * 60 * 60);
+  const r = await q("SELECT * FROM guests WHERE username=$1 AND updated >= $2", [username, fiveDaysAgo]);
+  return r.rows[0]||null;
+}
+
+// Admin force-release a guest username
+async function releaseGuestUsername(username){
+  await q("DELETE FROM guests WHERE username=$1", [username]);
+}
 
 // ── OTPs ──────────────────────────────────────────────────────────────────
 async function upsertOTP(email,code,expires){
@@ -133,9 +177,13 @@ async function deleteOTP(email) { await q("DELETE FROM otps WHERE email=$1",[ema
 // ── Leaderboard ───────────────────────────────────────────────────────────
 async function getLeaderboard() {
   const r = await pool.query(`
-    SELECT username, wins, losses, draws,
+    SELECT username, wins, losses, draws, 'registered' AS type,
       ROUND((CAST(wins AS NUMERIC) / GREATEST(wins+losses+draws, 1) * 100)::NUMERIC, 1) AS win_pct
     FROM users WHERE banned=FALSE
+    UNION ALL
+    SELECT username, wins, losses, draws, 'guest' AS type,
+      ROUND((CAST(wins AS NUMERIC) / GREATEST(wins+losses+draws, 1) * 100)::NUMERIC, 1) AS win_pct
+    FROM guests
     ORDER BY wins DESC, win_pct DESC LIMIT 20
   `);
   return r.rows;
@@ -147,7 +195,10 @@ module.exports = {
   addUserWin,addUserLoss,addUserDraw,
   addUserWinByName,addUserLossByName,addUserDrawByName,
   banUser,unbanUser,deleteUser,getAllUsers,
-  upsertGuest,addGuestWin,addGuestLoss,addGuestDraw,
+  upsertGuest,getGuest,getGuestByUsername,
+  addGuestWin,addGuestLoss,addGuestDraw,
+  updateGuestProfile,expireInactiveGuests,
+  getActiveGuestByUsername,releaseGuestUsername,
   upsertOTP,getOTP,deleteOTP,
   getLeaderboard,
 };
@@ -349,27 +400,34 @@ async function getUserBadges(username) {
   return r.rows;
 }
 
-async function checkAndAwardBadges(username) {
-  const user = await getProfile(username);
-  if (!user) return [];
+async function checkAndAwardBadges(username, playerType='registered', ip=null) {
+  // Get stats from right table
+  let stats;
+  if (playerType === 'guest' && ip) {
+    stats = await getGuest(ip);
+  } else {
+    stats = await getProfile(username);
+  }
+  if (!stats) return [];
+
   const existing = (await getUserBadges(username)).map(b=>b.badge_key);
   const newBadges = [];
-  const total = user.wins + user.losses + user.draws;
+  const total = (stats.wins||0) + (stats.losses||0) + (stats.draws||0);
 
   const check = async (key) => {
     if (!existing.includes(key)) { await awardBadge(username, key); newBadges.push(key); }
   };
 
-  if (user.wins >= 1)   await check('first_win');
-  if (user.wins >= 10)  await check('wins_10');
-  if (user.wins >= 50)  await check('wins_50');
-  if (user.wins >= 100) await check('wins_100');
-  if (user.win_streak >= 5)  await check('streak_5');
-  if (user.win_streak >= 10) await check('streak_10');
-  if (user.draws >= 10) await check('draw_master');
-  if (total >= 100)     await check('centurion');
+  if ((stats.wins||0) >= 1)   await check('first_win');
+  if ((stats.wins||0) >= 10)  await check('wins_10');
+  if ((stats.wins||0) >= 50)  await check('wins_50');
+  if ((stats.wins||0) >= 100) await check('wins_100');
+  if ((stats.win_streak||0) >= 5)  await check('streak_5');
+  if ((stats.win_streak||0) >= 10) await check('streak_10');
+  if ((stats.draws||0) >= 10) await check('draw_master');
+  if (total >= 100)            await check('centurion');
 
-  // social badge — check friend count
+  // social badge — check friend count (guests can add friends too)
   const fc = await pool.query(
     `SELECT COUNT(*) FROM friendships WHERE (requester=$1 OR addressee=$1) AND status='accepted'`,
     [username]);
