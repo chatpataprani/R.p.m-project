@@ -19,13 +19,14 @@ async function init() {
       banned        BOOLEAN DEFAULT FALSE,
       admin_created BOOLEAN DEFAULT FALSE,
       bio           TEXT DEFAULT '',
-      avatar_emoji  TEXT DEFAULT '🎮',
+      avatar_emoji  TEXT DEFAULT 'game',
       avatar_color  TEXT DEFAULT '#7c6aff',
       win_streak    INTEGER DEFAULT 0,
-      best_streak   INTEGER DEFAULT 0,
-      push_sub      TEXT DEFAULT NULL
-    );
+      best_streak   INTEGER DEFAULT 0
+    )
+  `);
 
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS guests (
       ip       TEXT PRIMARY KEY,
       username TEXT NOT NULL,
@@ -33,14 +34,18 @@ async function init() {
       losses   INTEGER DEFAULT 0,
       draws    INTEGER DEFAULT 0,
       updated  BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-    );
+    )
+  `);
 
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS otps (
       email   TEXT PRIMARY KEY,
       code    TEXT NOT NULL,
       expires BIGINT NOT NULL
-    );
+    )
+  `);
 
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS match_history (
       id         SERIAL PRIMARY KEY,
       username   TEXT NOT NULL,
@@ -50,34 +55,40 @@ async function init() {
       opp_score  INTEGER DEFAULT 0,
       goal       INTEGER DEFAULT 0,
       played_at  BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-    );
+    )
+  `);
 
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS badges (
       id         SERIAL PRIMARY KEY,
       username   TEXT NOT NULL,
       badge_key  TEXT NOT NULL,
       earned_at  BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
       UNIQUE(username, badge_key)
-    );
-
-    CREATE TABLE IF NOT EXISTS push_subs (
-      username   TEXT PRIMARY KEY,
-      sub        TEXT NOT NULL,
-      updated    BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-    );
+    )
   `);
 
-  // Add new columns to existing deployments without breaking them
   await pool.query(`
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT '';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_emoji TEXT DEFAULT '🎮';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_color TEXT DEFAULT '#7c6aff';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS win_streak INTEGER DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS best_streak INTEGER DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS push_sub TEXT DEFAULT NULL;
-  `).catch(()=>{});
+    CREATE TABLE IF NOT EXISTS push_subs (
+      username TEXT PRIMARY KEY,
+      sub      TEXT NOT NULL,
+      updated  BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+    )
+  `);
 
-  console.log("DB ready.");
+  // Migrate existing deployments — add new columns one by one safely
+  const alters = [
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT ''`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_emoji TEXT DEFAULT 'game'`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_color TEXT DEFAULT '#7c6aff'`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS win_streak INTEGER DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS best_streak INTEGER DEFAULT 0`,
+  ];
+  for (const sql of alters) {
+    await pool.query(sql).catch(() => {}); // ignore if column already exists
+  }
+
+  console.log("DB tables ready.");
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────
@@ -149,7 +160,9 @@ async function initFriends() {
       nickname   TEXT DEFAULT NULL,
       created    BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
       UNIQUE(requester, addressee)
-    );
+    )
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS messages (
       id         SERIAL PRIMARY KEY,
       sender     TEXT NOT NULL,
@@ -157,7 +170,7 @@ async function initFriends() {
       body       TEXT NOT NULL,
       seen       BOOLEAN DEFAULT FALSE,
       created    BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-    );
+    )
   `);
 }
 
