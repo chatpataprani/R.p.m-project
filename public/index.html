@@ -489,8 +489,58 @@ input::placeholder{color:var(--muted2);}
 .invite-toast-sub{font-size:.72rem;color:var(--muted);margin-bottom:12px;}
 .invite-toast-actions{display:flex;gap:8px;justify-content:center;}
 
-/* ═══════════════════════════════════════════════ FOOTER */
-.site-footer{
+/* ═══════════════════════════════════════════════ AUDIO CLIPS */
+.audio-panel{
+  position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+  width:100%;max-width:500px;
+  background:var(--card);border:1px solid var(--border-hi);
+  border-radius:20px 20px 0 0;padding:16px;z-index:200;
+  transition:transform .3s cubic-bezier(.4,0,.2,1);
+  transform:translateX(-50%) translateY(100%);
+}
+.audio-panel.open{transform:translateX(-50%) translateY(0);}
+.audio-panel-handle{
+  width:36px;height:4px;border-radius:2px;
+  background:var(--border-hi);margin:0 auto 14px;cursor:pointer;
+}
+.audio-panel-title{
+  font-family:'Syne',sans-serif;font-weight:800;font-size:.85rem;
+  margin-bottom:12px;text-align:center;color:var(--muted);
+  letter-spacing:.1em;text-transform:uppercase;
+}
+.audio-clips-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
+  max-height:260px;overflow-y:auto;
+}
+.audio-clip-btn{
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:10px 6px;cursor:pointer;
+  transition:all .18s;font-family:'Syne',sans-serif;
+  font-size:.65rem;font-weight:700;color:var(--muted);
+  text-align:center;letter-spacing:.05em;
+}
+.audio-clip-btn:hover{border-color:var(--accent);color:var(--text);transform:scale(1.05);}
+.audio-clip-btn.playing{border-color:var(--green);color:var(--green);}
+.audio-clip-emoji{font-size:1.6rem;line-height:1;}
+.audio-clip-name{font-size:.6rem;word-break:break-word;}
+
+/* audio btn in game/chat */
+.open-audio-btn{
+  font-size:1.2rem;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:6px 10px;cursor:pointer;transition:all .2s;
+}
+.open-audio-btn:hover{border-color:var(--accent);transform:scale(1.1);}
+
+/* playing indicator */
+.now-playing{
+  position:fixed;top:70px;left:50%;transform:translateX(-50%);
+  background:var(--card);border:1px solid var(--green);border-radius:10px;
+  padding:8px 16px;font-size:.75rem;color:var(--green);z-index:300;
+  display:none;animation:fadeUp .3s ease;
+}
+.now-playing.show{display:block;}
+</style>
   position:relative;z-index:1;width:100%;text-align:center;
   padding:28px 16px 20px;margin-top:auto;
   border-top:1px solid var(--border);
@@ -794,6 +844,22 @@ input::placeholder{color:var(--muted2);}
         <div id="admin-add-msg" style="font-size:.72rem;margin-top:8px;min-height:18px;"></div>
       </div>
 
+      <!-- Audio clips -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="section-label">🎵 Voice Clips</div>
+        <p style="font-size:.72rem;color:var(--muted);margin-bottom:12px;line-height:1.7;">Upload audio clips players can send during matches and in chat. Max 5MB each. Supported: mp3, wav, ogg, m4a, webm.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+          <input id="inp-clip-name" type="text" maxlength="20" placeholder="Clip name e.g. GG" style="flex:1;min-width:100px;"/>
+          <input id="inp-clip-emoji" type="text" maxlength="2" placeholder="🔊" style="width:52px;text-align:center;"/>
+          <label class="btn btn-primary btn-sm" style="cursor:pointer;position:relative;">
+            📁 Upload
+            <input type="file" id="inp-clip-file" accept=".mp3,.wav,.ogg,.m4a,.webm" style="position:absolute;inset:0;opacity:0;cursor:pointer;" onchange="adminUploadClip(this)"/>
+          </label>
+        </div>
+        <div id="admin-clip-msg" style="font-size:.72rem;min-height:18px;margin-bottom:10px;"></div>
+        <div id="admin-clips-list" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+      </div>
+
       <!-- Live rooms -->
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -1062,6 +1128,7 @@ input::placeholder{color:var(--muted2);}
             <button class="react-btn" onclick="sendReaction('💀')" title="Dead">💀</button>
             <button class="react-btn" onclick="sendReaction('👑')" title="Crown">👑</button>
             <button class="react-btn" onclick="sendReaction('😤')" title="Angry">😤</button>
+            <button class="open-audio-btn" onclick="openAudioPanel('match')" title="Voice clips">🎵</button>
           </div>
           <div class="btn-row" style="justify-content:center;margin-top:10px;">
             <button class="btn btn-primary btn-sm" onclick="nextRound()" id="btn-next-round">Next Round →</button>
@@ -1110,6 +1177,20 @@ input::placeholder{color:var(--muted2);}
 
 <div id="notif"></div>
 
+<!-- ════════════════════════════════════ AUDIO CLIPS PANEL -->
+<div class="audio-panel" id="audio-panel">
+  <div class="audio-panel-handle" onclick="closeAudioPanel()"></div>
+  <div class="audio-panel-title">🎵 Voice Clips</div>
+  <div class="audio-clips-grid" id="audio-clips-grid">
+    <div style="grid-column:span 3;text-align:center;color:var(--muted);font-size:.75rem;padding:20px;">
+      No clips yet. Admin can upload from the admin panel.
+    </div>
+  </div>
+</div>
+
+<!-- Now playing indicator -->
+<div class="now-playing" id="now-playing"></div>
+
 <!-- ════════════════════════════════════ BADGE EARNED TOAST -->
 <div class="badge-toast" id="badge-toast">
   <div class="badge-toast-title">🏅 Badge Unlocked!</div>
@@ -1149,6 +1230,7 @@ input::placeholder{color:var(--muted2);}
     <div class="chat-messages" id="chat-messages"></div>
     <div class="chat-input-row">
       <input id="chat-input" type="text" maxlength="500" placeholder="Type a message…" autocomplete="off"/>
+      <button class="open-audio-btn" onclick="openAudioPanel('chat')" title="Voice clips">🎵</button>
       <button class="btn btn-primary btn-sm" onclick="sendChatMessage()">→</button>
     </div>
   </div>
@@ -2591,6 +2673,223 @@ function updateLBs(data){
     makeLeaderboardClickable('lb-lobby');
     makeLeaderboardClickable('lb-game');
   },50);
+}
+</script>
+</body>
+</html>
+<script>
+// ══════════════════════════════════════════════════════ AUDIO CLIPS
+
+let audioClips = [];
+let audioPanelMode = 'match';
+let currentAudio = null;
+// Cache: id -> blob URL
+const audioBlobCache = {};
+
+async function loadAudioClips(){
+  try{
+    const r = await fetch('/audio/clips');
+    audioClips = await r.json();
+    renderAudioGrid();
+    if($('admin-clips-list')) renderAdminClips();
+  }catch(e){}
+}
+
+window.addEventListener('load', ()=> setTimeout(loadAudioClips, 1500));
+
+socket.on('clips_updated', clips => {
+  audioClips = clips;
+  renderAudioGrid();
+  if($('admin-clips-list')) renderAdminClips();
+});
+
+// Only show 'chat' type clips in panel (not win/lose/draw system sounds)
+function renderAudioGrid(){
+  const el = $('audio-clips-grid');
+  if(!el) return;
+  const chatClips = audioClips.filter(c => c.type === 'chat' || !c.type);
+  if(!chatClips.length){
+    el.innerHTML = `<div style="grid-column:span 3;text-align:center;color:var(--muted);font-size:.75rem;padding:20px;">No clips yet. Admin can upload from the admin panel.</div>`;
+    return;
+  }
+  el.innerHTML = chatClips.map(c=>`
+    <button class="audio-clip-btn" id="clip-btn-${c.id}" onclick="playAndSendClip(${c.id})">
+      <span class="audio-clip-emoji">${c.emoji||'🔊'}</span>
+      <span class="audio-clip-name">${c.name}</span>
+    </button>
+  `).join('');
+}
+
+function renderAdminClips(){
+  const el = $('admin-clips-list');
+  if(!el) return;
+  if(!audioClips.length){
+    el.innerHTML='<span style="color:var(--muted);font-size:.72rem">No clips uploaded yet.</span>';
+    return;
+  }
+  const typeLabel = { chat:'💬 Chat', win:'🏆 Win', lose:'💀 Lose', draw:'🤝 Draw' };
+  el.innerHTML = audioClips.map(c=>`
+    <div style="display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:6px;">
+      <span style="font-size:1.2rem">${c.emoji||'🔊'}</span>
+      <div style="flex:1">
+        <div style="font-size:.78rem;font-family:'Syne',sans-serif;font-weight:700;">${c.name}</div>
+        <div style="font-size:.62rem;color:var(--muted)">${typeLabel[c.type]||'💬 Chat'}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="previewClip(${c.id})">▶</button>
+      <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="adminDeleteClip(${c.id})">✕</button>
+    </div>
+  `).join('');
+}
+
+// ── Open/close panel ──────────────────────────────────────────────
+function openAudioPanel(mode){
+  audioPanelMode = mode || 'match';
+  renderAudioGrid();
+  $('audio-panel').classList.add('open');
+}
+function closeAudioPanel(){
+  $('audio-panel').classList.remove('open');
+}
+document.addEventListener('click', e=>{
+  const panel = $('audio-panel');
+  if(panel && panel.classList.contains('open') && !panel.contains(e.target) && !e.target.classList.contains('open-audio-btn')){
+    closeAudioPanel();
+  }
+});
+
+// ── Fetch and cache audio blob ────────────────────────────────────
+async function fetchClipBlob(clipId){
+  if(audioBlobCache[clipId]) return audioBlobCache[clipId];
+  const r = await fetch(`/audio/clip/${clipId}`);
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  audioBlobCache[clipId] = url;
+  return url;
+}
+
+// ── Play clip by ID ───────────────────────────────────────────────
+async function playClipById(clipId, showIndicator=true){
+  try{
+    const clip = audioClips.find(c=>c.id===clipId||c.id===Number(clipId));
+    if(!currentAudio){ } else { currentAudio.pause(); currentAudio=null; }
+    const url = await fetchClipBlob(clipId);
+    const audio = new Audio(url);
+    currentAudio = audio;
+    audio.play().catch(()=>{});
+    if(showIndicator && clip){
+      const np=$('now-playing');
+      if(np){
+        np.textContent=`${clip.emoji||'🔊'} ${clip.name}`;
+        np.classList.add('show');
+        setTimeout(()=>np.classList.remove('show'),2500);
+      }
+    }
+  }catch(e){ console.log('audio play error:', e.message); }
+}
+
+// ── Play and send ────────────────────────────────────────────────
+function playAndSendClip(clipId){
+  playClipById(clipId, true);
+  if(audioPanelMode === 'match'){
+    socket.emit('send_audio_clip', clipId);
+  } else if(audioPanelMode === 'chat' && currentChat){
+    socket.emit('send_audio_dm', { to: currentChat, clipId });
+  }
+  const btn=$(`clip-btn-${clipId}`);
+  if(btn){ btn.classList.add('playing'); setTimeout(()=>btn.classList.remove('playing'),1500); }
+  closeAudioPanel();
+}
+
+function previewClip(clipId){ playClipById(clipId, true); }
+
+// ── Receive clip ─────────────────────────────────────────────────
+socket.on('audio_clip_received', ({ clipId, from, isDM }) => {
+  const clip = audioClips.find(c=>c.id===clipId||c.id===Number(clipId));
+  playClipById(clipId, true);
+  if(clip) notify(`🎵 ${from}: ${clip.emoji||''} ${clip.name}`, '', 2500);
+});
+
+// ── System sounds: win / lose / draw ─────────────────────────────
+async function playSystemSound(type){
+  // type: 'win' | 'lose' | 'draw'
+  const clip = audioClips.find(c => c.type === type);
+  if(!clip) return;
+  await playClipById(clip.id, false);
+}
+
+// Hook into round_result to play system sounds automatically
+socket.on('round_result', ({ yourChoice, opponentChoice, result, score, history, goal, gameOver, winner }) => {
+  // Play sound on game over only
+  if(gameOver){
+    if(winner==='you') playSystemSound('win');
+    else if(winner==='opp') playSystemSound('lose');
+    else playSystemSound('draw');
+  }
+  // ... rest handled by existing round_result handler above
+});
+
+// ── Admin upload ─────────────────────────────────────────────────
+async function adminUploadClip(input){
+  const file = input.files[0];
+  if(!file) return;
+
+  const name     = $('inp-clip-name').value.trim() || file.name.replace(/\.[^.]+$/,'');
+  const emoji    = $('inp-clip-emoji').value.trim() || '🔊';
+  const clipType = $('inp-clip-type')?.value || 'chat';
+  const msg      = $('admin-clip-msg');
+
+  if(file.size > 5*1024*1024){
+    msg.innerHTML='<span style="color:var(--red)">✗ File too large. Max 5MB.</span>'; return;
+  }
+
+  msg.innerHTML='<span style="color:var(--muted)">Uploading…</span>';
+
+  try{
+    const res = await fetch('/admin/audio/upload', {
+      method: 'POST',
+      headers: {
+        ...adminHeader(),
+        'x-clip-name':     encodeURIComponent(name),
+        'x-clip-emoji':    encodeURIComponent(emoji),
+        'x-clip-mimetype': file.type || 'audio/mpeg',
+        'x-clip-type':     clipType,
+        'Content-Type':    'application/octet-stream',
+      },
+      body: file,
+    });
+    const d = await res.json();
+    if(d.ok){
+      msg.innerHTML=`<span style="color:var(--green)">✓ "${name}" uploaded!</span>`;
+      $('inp-clip-name').value='';
+      $('inp-clip-emoji').value='';
+      input.value='';
+      Object.keys(audioBlobCache).forEach(k=>{ URL.revokeObjectURL(audioBlobCache[k]); delete audioBlobCache[k]; });
+    } else {
+      msg.innerHTML=`<span style="color:var(--red)">✗ ${d.error}</span>`;
+    }
+  }catch(e){
+    msg.innerHTML=`<span style="color:var(--red)">Upload failed: ${e.message}</span>`;
+  }
+}
+
+async function adminDeleteClip(id){
+  if(!confirm('Delete this clip?')) return;
+  if(audioBlobCache[id]){ URL.revokeObjectURL(audioBlobCache[id]); delete audioBlobCache[id]; }
+  try{
+    const res = await fetch('/admin/audio/delete',{
+      method:'POST', headers:adminHeader(),
+      body:JSON.stringify({id})
+    });
+    const d = await res.json();
+    if(!d.ok) notify('Delete failed','bad');
+  }catch(e){ notify('Error','bad'); }
+}
+
+function openAdminPanel(){
+  prevPage = document.querySelector('.page.active')?.id || 'page-lobby';
+  showPage('page-admin');
+  adminRefresh();
+  loadAudioClips();
 }
 </script>
 </body>
