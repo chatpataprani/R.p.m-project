@@ -14,7 +14,7 @@ const io     = new Server(server);
 
 // ── Admin config (hardcoded) ───────────────────────────────────────────────
 const ADMIN_USERNAME = "dumber.4mir";
-const ADMIN_PASSWORD = "jayaisgay";
+const ADMIN_PASSWORD = "rps@admin2026";
 
 // ── Web Push — fully optional, won't crash if not configured ──────────────
 let webpush = null;
@@ -401,19 +401,18 @@ app.post("/friends/search", async (req, res) => {
   console.log(`Search request: query="${query}" from="${me}"`);
   if (!query || query.length < 2) return res.json([]);
   try {
-    const reg = await pool.query(
+    const reg = await db.pool.query(
       `SELECT username, 'registered' AS type FROM users WHERE username ILIKE $1 AND username != $2 LIMIT 8`,
       [`%${query}%`, me || '']);
     console.log(`Registered results:`, reg.rows.map(r=>r.username));
 
-    const guests = await pool.query(
+    const guests = await db.pool.query(
       `SELECT username, 'guest' AS type FROM guests WHERE username ILIKE $1 AND username != $2 LIMIT 5`,
       [`%${query}%`, me || '']);
     console.log(`Guest results:`, guests.rows.map(r=>r.username));
 
-    // Also check currently online users not yet in DB
     const onlineGuests = [];
-    for (const [username, info] of onlineUsers.entries()) {
+    for (const [username] of onlineUsers.entries()) {
       if (username.toLowerCase().includes(query.toLowerCase()) && username !== me) {
         const alreadyFound = [...reg.rows, ...guests.rows].some(r => r.username === username);
         if (!alreadyFound) onlineGuests.push({ username, type: 'online' });
@@ -798,4 +797,3 @@ Promise.all([db.init(), db.initFriends()]).then(async ()=>{
 
   server.listen(cfg.PORT,()=>console.log(`RPS → http://localhost:${cfg.PORT}`));
 }).catch(e=>{ console.error("DB init failed:",e.message); process.exit(1); });
-        
