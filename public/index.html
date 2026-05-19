@@ -1365,11 +1365,15 @@ async function requestOTPForNew(){
   btn.disabled=true;
 
   try{
+    const controller = new AbortController();
+    const timeout = setTimeout(()=>controller.abort(), 10000); // 10s timeout
     const res=await fetch('/auth/request-otp',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({email,username:pendingUsername})
+      body:JSON.stringify({email,username:pendingUsername}),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
     const d=await res.json();
     if(!d.ok){
       authErr('auth-error-2', d.error||'Failed to send code.');
@@ -1385,7 +1389,8 @@ async function requestOTPForNew(){
       notify('Code sent! Check your inbox ✉️','good',5000);
     }
   }catch(e){
-    authErr('auth-error-2','Network error. Check your connection.');
+    const msg = e.name==='AbortError' ? 'Request timed out. Try again.' : 'Network error. Check your connection.';
+    authErr('auth-error-2', msg);
   }finally{
     btn.textContent=origText; btn.disabled=false;
   }
