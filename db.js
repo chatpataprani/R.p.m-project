@@ -93,6 +93,18 @@ async function init() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS audio_clips (
+      id         SERIAL PRIMARY KEY,
+      name       TEXT NOT NULL,
+      emoji      TEXT DEFAULT '🔊',
+      data       TEXT NOT NULL,
+      mimetype   TEXT DEFAULT 'audio/mpeg',
+      type       TEXT DEFAULT 'chat',
+      created    BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+    )
+  `);
+
   // Migrate existing deployments — add new columns one by one safely
   const alters = [
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS banned BOOLEAN DEFAULT FALSE`,
@@ -466,4 +478,37 @@ module.exports.savePushSub         = savePushSub;
 module.exports.getPushSub          = getPushSub;
 module.exports.deletePushSub       = deletePushSub;
 module.exports.pool                = pool;
-    
+
+// ── Audio Clips ───────────────────────────────────────────────────────────
+async function getAudioClips() {
+  // Don't return data field in list — too large
+  const r = await pool.query(`SELECT id, name, emoji, mimetype, type, created FROM audio_clips ORDER BY created ASC`);
+  return r.rows;
+}
+
+async function getAudioClipData(id) {
+  const r = await pool.query(`SELECT * FROM audio_clips WHERE id=$1`, [id]);
+  return r.rows[0] || null;
+}
+
+async function addAudioClip(name, emoji, data, mimetype, type) {
+  const r = await pool.query(
+    `INSERT INTO audio_clips (name, emoji, data, mimetype, type) VALUES ($1,$2,$3,$4,$5) RETURNING id, name, emoji, mimetype, type, created`,
+    [name, emoji||'🔊', data, mimetype||'audio/mpeg', type||'chat']);
+  return r.rows[0];
+}
+
+async function deleteAudioClip(id) {
+  await pool.query(`DELETE FROM audio_clips WHERE id=$1`, [id]);
+}
+
+async function getSystemSounds() {
+  const r = await pool.query(`SELECT id, name, emoji, mimetype, type FROM audio_clips WHERE type IN ('win','lose','draw') ORDER BY created ASC`);
+  return r.rows;
+}
+
+module.exports.getAudioClips    = getAudioClips;
+module.exports.getAudioClipData = getAudioClipData;
+module.exports.addAudioClip     = addAudioClip;
+module.exports.deleteAudioClip  = deleteAudioClip;
+module.exports.getSystemSounds  = getSystemSounds;
