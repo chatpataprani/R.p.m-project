@@ -1,124 +1,114 @@
-# 🪨 Rock Paper Scissors — Render Deploy Guide
+<div align="center">
 
-## 📁 Files
-```
-rps-game-v2/
-├── server.js        # Express + Socket.io (async, PostgreSQL)
-├── db.js            # PostgreSQL queries via pg
-├── config.js        # Email / SMTP config
-├── package.json
-└── public/
-    └── index.html   # Full frontend
-```
+# ✊✋✌️ Rock · Paper · Scissors Online
+
+**A real-time multiplayer Rock Paper Scissors game with friends, profiles, leaderboards, and more.**
+
+[![Live Demo](https://img.shields.io/badge/Live-dumber--game.onrender.com-7c6aff?style=for-the-badge)](https://dumber-game.onrender.com)
+[![Made by](https://img.shields.io/badge/Made%20by-@dumber.4mir%20%26%20@dumbb.jay4-ff4f7b?style=for-the-badge)](https://instagram.com/dumber.4mir)
+
+</div>
 
 ---
 
-## 🚀 Deploy on Render (Step by Step)
+## 🎮 What is this?
 
-### Step 1 — Push to GitHub
-Render deploys from Git. Push your project to a GitHub repo:
-```bash
-git init
-git add .
-git commit -m "initial commit"
-git remote add origin https://github.com/YOUR_USERNAME/rps-game.git
-git push -u origin main
-```
-
-### Step 2 — Create PostgreSQL Database on Render
-1. Go to [render.com](https://render.com) → **New** → **PostgreSQL**
-2. Give it a name (e.g. `rps-db`)
-3. Choose the **Free** plan
-4. Click **Create Database**
-5. Once created, copy the **Internal Database URL** (starts with `postgres://`)
-
-### Step 3 — Create Web Service on Render
-1. **New** → **Web Service**
-2. Connect your GitHub repo
-3. Fill in:
-   - **Name**: `rps-game`
-   - **Runtime**: `Node`
-   - **Build Command**: `npm install`
-   - **Start Command**: `node server.js`
-   - **Plan**: Free
-
-### Step 4 — Set Environment Variables
-In your Web Service → **Environment** tab, add these:
-
-| Key | Value |
-|-----|-------|
-| `DATABASE_URL` | (paste the Internal DB URL from Step 2) |
-| `PORT` | `10000` |
-| `SMTP_HOST` | `smtp.gmail.com` |
-| `SMTP_PORT` | `587` |
-| `SMTP_USER` | `your@gmail.com` |
-| `SMTP_PASS` | `your-gmail-app-password` |
-| `SMTP_FROM` | `"RPS Game" <your@gmail.com>` |
-| `SESSION_SECRET` | any long random string |
-
-> **Gmail App Password**: Google Account → Security → 2-Step Verification → App Passwords → generate one
-
-### Step 5 — Deploy
-Click **Deploy** — Render will install deps, connect to Postgres, and go live.
-
-Your app will be at: `https://rps-game.onrender.com`
-
----
-
-## ⚠️ Render Free Tier Notes
-- Web services **spin down after 15 min of inactivity** — first load after sleep takes ~30s
-- PostgreSQL free tier has a **90-day limit** then you need to recreate it
-- Upgrade to a paid plan ($7/mo) to avoid spindown
+A fully-featured online multiplayer Rock Paper Scissors game where you can challenge friends, climb the leaderboard, collect badges, and chat — all in real time.
 
 ---
 
 ## ✨ Features
-| Feature | Details |
+
+### 🕹️ Gameplay
+- **Real-time multiplayer** — play against anyone online instantly
+- **Random matchmaking** — get paired with a random opponent
+- **Private rooms** — create a room with a 6-character code and invite a friend
+- **Win goal system** — both players propose and agree on a target (e.g. first to 5 wins)
+- **Round history** — W/L/D dots tracked live during the match
+- **Animated hand reveals** — shake animation before the reveal
+- **Reactions** — send 👊🔥😭😂🤝💀👑😤 after each round
+
+### 👤 Accounts
+- **Email OTP login** — sign in with your email, no password needed
+- **Guest mode** — play without an account, username saved to your device
+- **Special access accounts** — admin can create accounts for people without email
+- **Persistent stats** — wins, losses, draws tracked forever (guests kept for 5 days of inactivity)
+
+### 👥 Social
+- **Friends system** — send/accept friend requests like Instagram
+- **Online status** — see if friends are Online 🟢, Playing 🟡, or Offline ⚫
+- **Real-time chat** — message friends directly
+- **Custom nicknames** — set a private nickname for each friend
+- **Play invites** — challenge a friend to a match with one tap
+
+### 👤 Profiles
+- **Public profile pages** — view anyone's profile by clicking their name
+- **Avatar builder** — pick an emoji and color for your avatar
+- **Bio** — write a short description
+- **Win streak** — current and best streak tracked
+- **Match history** — last 20 games shown on profile
+
+### 🏅 Badges
+Unlock badges automatically by playing:
+
+| Badge | How to unlock |
 |---|---|
-| 📧 Email OTP | 6-digit code, 10-min expiry |
-| 👤 Guest Mode | Saved by IP + localStorage |
-| 🔐 Private Rooms | 6-char code, host sets goal |
-| 🎲 Matchmaking | Queue-based random pairing |
-| 🤝 Goal Negotiation | Propose / accept / counter |
-| ✊ Hand Animations | Shake + bounce reveal |
-| 📊 Round History | W/L/D dots + live score |
-| 🏆 Leaderboard | Registered players, all-time wins |
-| 💾 PostgreSQL | Persistent data on Render |
+| 🩸 First Blood | Win your first match |
+| ⭐ Rising Star | Win 10 matches |
+| 🎖️ Veteran | Win 50 matches |
+| 🏆 Legend | Win 100 matches |
+| 🔥 On Fire | Win 5 in a row |
+| ⚡ Unstoppable | Win 10 in a row |
+| 🤝 Draw Master | Draw 10 matches |
+| ⚔️ Centurion | Play 100 matches |
+| 🦋 Social Butterfly | Add 5 friends |
+
+### 🏆 Leaderboard
+- Combined leaderboard showing both registered and guest players
+- All-time wins ranking with win percentage
+- Click any username to view their profile
+- Guest players shown with a `guest` tag
+
+### ⚙️ Admin Panel
+- Full player management (view, ban, unban, delete)
+- Add special access accounts (no email needed)
+- Live room viewer — see all active matches
+- Queue monitor
+
+### 📱 PWA
+- Installable on phone via "Add to Home Screen"
+- Works like a native app
 
 ---
 
-## 🔔 Push Notifications Setup (VAPID Keys)
+## 🛠️ Tech Stack
 
-Run this once locally to generate your keys:
-```bash
-cd rps-game-v2
-npm install
-node -e "const wp=require('web-push');const k=wp.generateVAPIDKeys();console.log('VAPID_PUBLIC='+k.publicKey+'\nVAPID_PRIVATE='+k.privateKey)"
-```
-
-Copy the output and add both as Render environment variables:
-| Key | Value |
-|-----|-------|
-| `VAPID_PUBLIC` | the publicKey output |
-| `VAPID_PRIVATE` | the privateKey output |
-
-Push notifications will then work for:
-- 👋 Friend requests
-- 💬 Chat messages (when offline)
-- ⚔️ Play invites (when offline)
-
-If you skip this step the app still works — push notifications are just disabled.
+| Layer | Technology |
+|---|---|
+| Backend | Node.js + Express |
+| Real-time | Socket.io |
+| Database | PostgreSQL |
+| Frontend | Vanilla HTML/CSS/JS |
+| Email | Nodemailer (SMTP) |
+| Push | Web Push (VAPID) |
+| Hosting | Render |
 
 ---
 
-## 🆕 v3 Features
-| Feature | Details |
-|---|---|
-| 👤 Public profiles | `/profile/:username` — avatar, bio, stats, badges, match history |
-| 🏅 Badges | 9 auto-unlocked badges based on wins, streaks, draws, friends |
-| 📜 Match history | Last 20 games stored per player |
-| 🔥 Win streaks | Live streak + best streak tracked |
-| 👊 Reactions | 8 emojis after each round, float animation for opponent |
-| 🔔 Push notifications | VAPID-based, friend requests/messages/invites |
-| 📱 PWA | Installable on phone via browser "Add to Home Screen" |
-| 🖱️ Clickable leaderboard | Tap any username to view their profile |
+## 👨‍💻 Developers
+
+<div align="center">
+
+Made with 🎮 by
+
+[![@dumber.4mir](https://img.shields.io/badge/Instagram-@dumber.4mir-E4405F?style=flat&logo=instagram)](https://instagram.com/dumber.4mir)
+&nbsp;
+[![@dumbb.jay4](https://img.shields.io/badge/Instagram-@dumbb.jay4-E4405F?style=flat&logo=instagram)](https://instagram.com/dumbb.jay4)
+
+</div>
+
+---
+
+<div align="center">
+© 2026 RPS Online · All rights reserved
+</div>
