@@ -1379,7 +1379,11 @@ async function requestOTPForNew(){
     $('new-email-label').textContent=email;
     showLoginStep('step-new-otp');
     setupOTPBoxes('otp-boxes-new', verifyNewOTP);
-    notify('Code sent! Check your inbox ✉️','good',5000);
+    if(d.emailSent===false){
+      notify('⚠ Email not configured — check server logs for your code','bad',10000);
+    } else {
+      notify('Code sent! Check your inbox ✉️','good',5000);
+    }
   }catch(e){
     authErr('auth-error-2','Network error. Check your connection.');
   }finally{
@@ -1401,7 +1405,11 @@ async function doRequestOTP(email, username, errorElId){
       if(errorElId) authErr(errorElId, msg);
       return false;
     }
-    notify('Code sent! Check your inbox ✉️','good',5000);
+    if(d.emailSent===false){
+      notify('⚠ Email not configured — check Render logs for your code','bad',10000);
+    } else {
+      notify('Code sent! Check your inbox ✉️','good',5000);
+    }
     return true;
   }catch(e){
     const msg='Network error. Check your connection.';
